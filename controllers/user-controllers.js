@@ -1,5 +1,14 @@
+import fs from "fs/promises";
+
+import path from "path";
+
 import bcrypt from "bcryptjs";
+
+import Jimp from "jimp";
+
 import jwt from "jsonwebtoken";
+
+import gravatar from "gravatar";
 
 import "dotenv/config";
 
@@ -8,6 +17,7 @@ import User from "../models/user.js";
 import { HttpError } from "../helpers/index.js";
 
 import { ctrWrapper } from "../decorators/index.js";
+import { error } from "console";
 
 const { JWT_SECRET } = process.env;
 
@@ -20,7 +30,12 @@ const signup = async (req, res) => {
   }
 
   const hashPassword = await bcrypt.hash(password, 10);
-  const newUser = await User.create({ ...req.body, password: hashPassword });
+  const avatarURL = gravatar.url(email);
+  const newUser = await User.create({
+    ...req.body,
+    password: hashPassword,
+    avatarURL,
+  });
   res.status(201).json({
     email: newUser.email,
     subscription: newUser.subscription,
@@ -57,6 +72,7 @@ const getCurrent = (req, res) => {
   const { email, subscription } = req.user;
   res.json({ email, subscription });
 };
+
 const updateSubscription = async (req, res) => {
   const { _id } = req.user;
   const result = await User.findByIdAndUpdate(_id, req.body, {
@@ -68,10 +84,41 @@ const updateSubscription = async (req, res) => {
   res.json(result);
 };
 
+const avatarPath = path.resolve("public", "avatars");
+console.log(avatarPath);
+
+const updateAvatar = async (req, res) => {
+  const { _id } = req.user;
+  const { path: oldPath, filename } = req.file;
+  try {
+    const image = await Jimp.read(oldPath);
+    await image.resize(250, 250);
+    await image.writeAsync(oldPath);
+    req.file.path = oldPath;
+  } catch (error) {
+    throw HttpError(400, `${error.message}`);
+  }
+  const newPath = path.join(avatarPath, filename);
+  await fs.rename(oldPath, newPath);
+  const url = path.join("avatars", filename);
+  const result = await User.findByIdAndUpdate(
+    _id,
+    { avatarURL: url },
+    {
+      new: true,
+    }
+  );
+  if (!result) {
+    throw HttpError(401, "Not authorized");
+  }
+  res.json({ result });
+};
+
 export default {
   signup: ctrWrapper(signup),
   signin: ctrWrapper(signin),
   logout: ctrWrapper(logout),
   getCurrent: ctrWrapper(getCurrent),
   updateSubscription: ctrWrapper(updateSubscription),
+  updateAvatar: ctrWrapper(updateAvatar),
 };
